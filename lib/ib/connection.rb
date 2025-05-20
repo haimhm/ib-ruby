@@ -137,7 +137,6 @@ module IB
             error "#{what} must represent incoming IB message class", :args
           end
           message_classes.flatten.each do |message_class|
-            # TODO: Fix: RuntimeError: can't add a new key into hash during iteration
             subscribers[message_class][id] = subscriber
           end
         end
@@ -263,10 +262,13 @@ module IB
       error "Got unsupported message #{msg_id}" unless Messages::Incoming::Classes[msg_id]
       msg = Messages::Incoming::Classes[msg_id].new(socket)
 
-      # Deliver message to all registered subscribers, alert if no subscribers
-      @subscribe_lock.synchronize do
-        subscribers[msg.class].each { |_, subscriber| subscriber.call(msg) }
+      # Deliver message to all registered subscribers. We duplicate the
+      # subscriber list so that callbacks may safely modify subscriptions
+      # without triggering "can't add a new key into hash during iteration".
+      subscribers_list = @subscribe_lock.synchronize do
+        subscribers[msg.class].values.dup
       end
+      subscribers_list.each { |subscriber| subscriber.call(msg) }
       log.warn "No subscribers for message #{msg.class}!" if subscribers[msg.class].empty?
 
       # Collect all received messages into a @received Hash
